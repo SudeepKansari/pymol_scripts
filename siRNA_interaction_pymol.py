@@ -1,58 +1,88 @@
+#Usage: Keep the PDB files (Human AGO2-chain A + siRNA-chain B) in the same path as this script.
+#Requisites: PyMOL should be in PATH; can be accessed by command line
+#Command-
+#python3 siRNA_interaction_pymol.py
+
 import os
-import pymol
-from pymol import cmd
+import pymol2
+
+OUTPUT_DIR = "interactions"
+
+CUTOFFS = {
+    "h_bonds": 3.5,
+    "salt_bridge": 4.0,
+    "hydrophobic": 4.5,
+    "vdw": 5.0,
+    "cation_pi": 5.0,
+    "pi_stack": 6.0,
+}
 
 
+def get_residue_pairs(cmd, selA, selB, cutoff):
+    """Find unique residue pairs between two selections within cutoff"""
+    pairs = set()
 
-# Define function to execute interaction selection and extraction
-def analyze_interactions(pdb_file, pathxn):
-   # global result  # Declare the global result variable
-    
-    # Reinitialize PyMOL for each new pdb file to clear previous data
+    # Get atoms from A near B
+    model = cmd.get_model(f"({selA}) within {cutoff} of ({selB})")
+
+    for atom in model.atom:
+        resA = (atom.chain, atom.resn, atom.resi)
+
+        # Find residues from B near this residue
+        nearB = cmd.get_model(
+            f"({selB}) within {cutoff} of (chain {atom.chain} and resi {atom.resi})"
+        )
+
+        for b in nearB.atom:
+            resB = (b.chain, b.resn, b.resi)
+            if resA[0] != resB[0]:
+                pairs.add((resA, resB))
+
+    return pairs
+
+
+def analyze_interactions(pdb_path, cmd):
+    name = os.path.splitext(os.path.basename(pdb_path))[0]
+
     cmd.reinitialize()
-    
-    # Load the PDB file into PyMOL
-    cmd.load(pdb_file)
-    
-    # Define the selection commands
+    cmd.load(pdb_path)
+
     interactions = {
-        'h_bonds': "select h_bonds, (chain B and (name N* or name O*)) around 3.5",
-        'hydrophobic': "select hydrophobic, (chain B and (resn ALA or resn LEU or resn ILE or resn PHE or resn VAL or resn PRO)) around 4.0",
-        'salt_bridge': "select salt_bridge, (chain B and (resn LYS or resn ARG or resn GLU or resn ASP)) around 3.5",
-        'vdw': "select vdw, (chain B) around 4.0",
-        'cation_pi': "select cation_pi, (chain B and (resn PHE or resn TYR or resn HIS)) around 4.5",
-        'pi_stack': "select pi_stack, (chain B and (resn PHE or resn TYR or resn TRP)) around 5.0"
+        "h_bonds": "(name N* or name O*)",
+        "salt_bridge": "(resn LYS or resn ARG or resn ASP or resn GLU)",
+        "hydrophobic": "(resn ALA or resn VAL or resn LEU or resn ILE or resn PHE or resn PRO or resn MET)",
+        "vdw": "all",
+        "cation_pi": "(resn PHE or resn TYR or resn TRP or resn HIS or resn LYS or resn ARG)",
+        "pi_stack": "(resn PHE or resn TYR or resn TRP or resn HIS)"
     }
 
+    for interaction, selection in interactions.items():
+        selA = f"chain A and {selection}"
+        selB = "chain B"
 
-    # Iterate through each interaction type
-    for interaction_name, select_cmd in interactions.items():
-        cmd.do(select_cmd)  # Run the selection command
-        
-        pml_write(pathxn + pdb_file.replace(".pdb", ""), interaction_name)
-        cmd.load("template.py")
-    print(f'Generated output for {pdb_file}')
+        pairs = get_residue_pairs(cmd, selA, selB, CUTOFFS[interaction])
 
+        out_file = os.path.join(OUTPUT_DIR, f"{name}_{interaction}.txt")
+        with open(out_file, "w") as f:
+            for (c1, r1, i1), (c2, r2, i2) in sorted(pairs, key=lambda x: (int(x[0][2]), int(x[1][2]))):
+                f.write(f"{c1} {r1} {i1}  <-->  {c2} {r2} {i2}\n")
 
-def pml_write(filename, interaction_name):
-    const =["""    
-import os
-import pymol
-from pymol import cmd
-""", """
-with open(""" + f'"{filename}_{interaction_name}.txt"' + ', "w") as output_file:',
-"""
-    # Iterate over a selection of atoms and write each atom's name and coordinates to the file
-    cmd.iterate(""" +f'"{interaction_name}"' +""", 'output_file.write(f"Chain B: {resi}, {resn}, {chain}\\\\n")')
-"""]
-
-    with open("template.py", "w") as inp:
-        inp.write("\n".join(const))
+    print(f"✔ Interactions extracted for {name}")
 
 
-output_prefix = "output_dir/" #output_dir
-# Loop through the PDB files in the working directory
-working_directory = './'  # Make sure this is the correct working directory path
-for pdb_file in os.listdir(working_directory):
-    if pdb_file.endswith('.pdb'):  # Only process PDB files
-        analyze_interactions(pdb_file, output_prefix)
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    pdbs = [f for f in os.listdir('.') if f.endswith('.pdb')]
+    if not pdbs:
+        print("No PDB files found.")
+        return
+
+    with pymol2.PyMOL() as pymol:
+        cmd = pymol.cmd
+        for pdb in pdbs:
+            analyze_interactions(pdb, cmd)
+
+
+if __name__ == "__main__":
+    main()
