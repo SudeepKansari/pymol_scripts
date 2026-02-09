@@ -1,6 +1,7 @@
 #PyMOL script to basically inspect CYS-CYS disulfide bridges 
 #between a template and a modeled protein structure in PyMOL GUI.
-#Requisite: PyMOL should be in PATH; accessible in command-line
+#Requisite: PyMOL should be in PATH; accessible in command-line;
+#both the pdb files should be in the same path as the script
 #Command:
 #python3 check_disulfide_bridge.py <template_pdb> <target_pdb> CYS
 
